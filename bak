@@ -1,0 +1,483 @@
+# ====================
+# Python chat
+# ====================
+#
+# Description:
+# A simple chat program.
+#
+
+
+# =======
+# Imports
+# =======
+# import all the dependencies
+import sys
+
+# before continuing we should check if application is compatible
+# with the current python version.
+if sys.version_info < (2,7):
+    print('This application requires python 2.7 (Preferably 2.7.8 release version)')
+
+#import the rest of the dependencies
+import socket
+import threading
+import time
+
+# Import wxPython Module
+try:
+    import wx # import the wxPython module.
+except ImportError:
+    # import failed, show error.
+    print('This application requires the wxPython module to run.')
+    sys.exit(10)
+
+# ================
+# Global Variables
+# ================
+
+# Holds the pointer to the history textctrl
+historyData = ''
+# Holds the pointer to the users textctrl
+userlistData = ''
+# Stores user's username
+username = 'Default'
+# Status variable that determines whether it is host or not
+isHost = False
+# Array that stores all the client handler threads
+# Only the host make use of this
+serverclients = []
+# Debugging
+debugMode = False
+
+# Debug output function.
+def dbg(msg,type='info'):
+    if debugMode:
+        print('*['+type+']: '+msg)
+        historyData.AppendText('*['+type+']: '+msg+'\n')
+
+# updateUSersList()
+# Params: none
+# Desc: updates the users list textctrl
+def updateUsersList():
+    global username
+    dbg('updating user list')
+    if userlistData != '':
+        userlistData.Clear()
+        userlistData.AppendText('#['+username+']\n')
+        for tc in serverclients:
+            userlistData.AppendText('#'+tc.username+'\n')
+
+# serverSocket()
+# Params: port - Port number, cnum - Number of clients to listen
+# Desc: creates a server socket object with the supplied port
+# and listener number
+def serverSocket(port,cnum):
+    servsock = socket.socket(socket.AF_INET,socket.SOCK_STREAM) # create socket object
+    servsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # set some options
+    hostip = socket.gethostbyname(socket.getfqdn())
+    try:
+        servsock.bind((hostip,port)) # bind to socket
+        servsock.listen(cnum) # listen for connections
+        dbg('server socket created and now listening. cnum: '+str(cnum))
+        return servsock # return socket object
+    except socket.error as err:
+        dbg('server socket could not be created! :'+str(err),'error')
+        historyData('Server socket could not be created!\n'+str(err)+'\n')
+        return None
+
+# clientSocket()
+# Params: port - Port number, hostip - The host to connect to,
+# username - the user's username
+# Desc: creates a client socket object using the supplied parameters
+def clientSocket(port,hostip,username):
+    clisock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket object
+    try:
+        clisock.connect((hostip,port)) # connect to host
+        dbg('client socket connected')
+        clisock.send('0usern_update '+str(username)) # send a username update command
+        return clisock #return socket object
+    except socket.error as err:
+        dbg('could not connect to server! :'+str(err),'error')
+        historyData.AppendText('Could not connect to server!\n'+str(err)+'\n')
+        return None
+
+# closeSocket()
+# Params: sock - teh socket object, noshut - whether we should
+# call shutdown or not (default FALSE)
+# Desc: closes and shuts down a socket connection
+def closeSocket(sock,noshut = False):
+    if not noshut:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except socket.error as err:
+            dbg('socket shutdown error: '+str(err))
+    sock.close()
+
+# clientHandlerThread() : THREAD
+# threading.Thread
+# Desc: thread that handles the connection to a client
+class clientHandlerThread(threading.Thread):
+    def __init__(self,ip,port,sock):
+        threading.Thread.__init__(self)
+        self.ip = ip
+        self.port = port
+        self.sock = sock
+        self.username = '?'
+        self.daemon = True
+        self.term = False
+        dbg('client handler thread created!')
+    
+    def stop(self):
+        dbg('thread terminate requested')
+        self.term = True
+    
+    def run(self):
+        dbg('client handler thread started!')
+        while not self.term:
+            global historyData
+            global userlistData
+            global isHost
+            try:
+                self.buffer = self.sock.recv(512)
+                if len(self.buffer) > 0:
+                    dbg('received data from client: '+self.buffer)
+                    lock = threading.RLock()
+                    lock.acquire(True)
+                    try:
+                        # interpret received message
+                        # 0 - command message, 1 - regular message
+                        # usern_update - update client username
+                        # ulist_update - update user names list
+                        # ulist_asknew - ask for user list update
+                        dbg('interpreting data from client: '+self.buffer)
+                        if self.buffer[:1] =='0': # command message
+                            dbg('command message')
+                            params = self.buffer[1:].split(' ')
+                            if params[0] == 'usern_update': # a username update command
+                                dbg('username update')
+                                self.username = str(params[1])
+                                updateUsersList()
+                                if isHost:
+                                    for tc in serverclients:
+                                        tc.send('0ulist_update '+userlistData.GetValue())
+                            elif params[0] == 'ulist_update': # users list update command
+                                dbg('users list update')
+                                userlistData.SetValue(str(params[1]))
+                            elif params[0] == 'ulist_asknew':
+                                dbg('asking for a user list update')
+                                updateUsersList()
+                                if isHost:
+                                    for tc in serverclients:
+                                        tc.send('0ulist_update '+userlistData.GetValue())
+                            elif params[0] == 'sock_shutreq': # socket shutdown request
+                                if not isHost: # if we are a client
+                                    dbg('server requested to close connection')
+                                    break
+                            else:
+                                dbg('unknown command','warn')
+                        elif self.buffer[:1] == '1': # regular message
+                            dbg('regular message')
+                            if historyData != '':
+                                historyData.AppendText(self.buffer[1:])
+                            for tc in serverclients: # echo to other clients
+                                if tc != self:
+                                    tc.send(self.buffer)
+                        else:
+                            dbg('unknown message','warn')
+                    finally:
+                        lock.release()
+                else:
+                    break
+            except socket.error as err:
+                if self.term:
+                    break
+        #closeSocket(self.sock)
+        #self.sock = None
+        global frame
+        frame.cmdExecute(['/end'])
+        dbg('client handler thread terminated.')
+        return
+    
+    def send(self,data):
+        if self.sock != None:
+            dbg('sending to client: '+str(data))
+            self.sock.send(str(data))
+
+# connectionHandlerThread() : THREAD
+# threading.Thread
+# Desc: thread handles accepting connections
+class connectionHandlerThread(threading.Thread):
+    def __init__(self,sock):
+        threading.Thread.__init__(self)
+        self.sock = sock
+        self.sock.setblocking(0)
+        self.daemon = True
+        self.term = False
+        dbg('connection handler thread created!')
+    
+    def stop(self):
+        self.term = True
+    
+    def run(self):
+        dbg('connection handler thread started!')
+        clsock,ip,port,user = None,None,None,None
+        while not self.term:
+            global serverclients
+            while not self.term:
+                try:
+                    (clsock,(ip,port)) = self.sock.accept() # accept connections
+                    dbg('accepted a connection')
+                    break
+                except socket.error as err:
+                    if self.term:
+                        closeSocket(clsock)
+                        return
+            clsock.setblocking(1)
+            user = clsock.recv(512)
+            if user[:1] == '0': # command msg
+                params = user[1:].split(' ')
+                if params[0] == 'usern_update':
+                    nusername = params[1]
+                    clsock.send('1Welcome '+str(nusername)+'!\n')
+                    if historyData != '':
+                        historyData.AppendText(''+str(nusername)+' has joined the chat.\n')
+                    dbg('connection accepted!')
+                    clsock.setblocking(0) # make socket nonblocking
+                    cthread = clientHandlerThread(ip,port,clsock) # create new handler thread
+                    cthread.username = nusername
+                    cthread.start() # start client handler thread
+                    lock = threading.RLock()
+                    lock.acquire(True)
+                    try:
+                        serverclients.append(cthread)
+                    finally:
+                        lock.release()
+                    #updateUsersList()
+                else:
+                    #clsock.shutdown(socket.SHUT_RDWR)
+                    #clsock.close()
+                    closeSocket(clsock)
+                    dbg('connection declined! - wrong operation')
+            else:
+                #clsock.shutdown(socket.SHUT_RDWR)
+                #clsock.close()
+                closeSocket(clsock)
+                dbg('connection declined! - wrong message type')
+        if clsock != None:
+            closeSocket(clsock)
+            #clsock.shutdown(socket.SHUT_RDWR)
+            #clsock.close()
+        dbg('connection handler thread terminated.')
+        return
+
+# appFrame() : wxFRAME
+# wx.Frame
+# Desc: application frame class
+class appFrame(wx.Frame):
+    def __init__(self,parent,title):
+        wx.Frame.__init__(self,parent,title=title,size=(500,450)) # create app frame
+        
+        # application variables
+        self.conhandler = None # connections handler thread
+        self.servername = 'Debug' # chat server name (only if this is host)
+        self.userslist = [] # list of users
+        self.socket = None # socket object
+        
+        # create text boxes
+        self.history = wx.TextCtrl(self,style=(wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_WORDWRAP)) # history textctrl
+        self.users = wx.TextCtrl(self,style=(wx.TE_MULTILINE|wx.TE_READONLY|wx.TE_WORDWRAP)) # users textctrl
+        self.input = wx.TextCtrl(self,style=(wx.TE_PROCESS_ENTER|wx.TE_PROCESS_TAB|wx.TE_WORDWRAP)) # input textctrl
+        self.input.SetFocus() # set initial focus to input box
+        
+        # assign pointers to textboxes
+        global historyData # access global variable historyData
+        global userlistData # access global variable userlistData
+        historyData = self.history # set pointer
+        userlistData = self.users # set pointer
+        
+        # create the sizer for the top half of frame
+        self.topsizer = wx.BoxSizer(wx.HORIZONTAL) # create sizer
+        self.topsizer.Add(self.history,5,wx.EXPAND) # add chat history to top left half of frame
+        self.topsizer.Add(self.users,1,wx.EXPAND) # add users list to top right half of frame
+        
+        #create sizer for the the whole frame
+        self.appsizer = wx.BoxSizer(wx.VERTICAL) # create sizer
+        self.appsizer.Add(self.topsizer,10, wx.EXPAND) # add top half of frame to main frame sizer
+        self.appsizer.Add(self.input,1,wx.EXPAND) # add input box to bottom half of frame
+        
+        # set event handlers
+        self.Bind(wx.EVT_TEXT_ENTER, self.OnEnter,self.input) # bind OnEnter function to EVT_TEXT_ENTER event
+        self.Bind(wx.EVT_CLOSE, self.OnTerminate) # bind OnTerminate function to EVT_CLOSE event
+        
+        # start help
+        self.starthelp = ('Welcome to ChatC!\n\n'
+                          'To connect to a server type\n"/join [server ip] [port number]"\n\n'
+                          'To host a chat session type\n"/behost [server name] [port number]"\n\n'
+                          'Change your username by typing "/username [new username]"\n\n'
+                          'For more info about the commands type "/help"\n\n'
+                          )
+        self.history.AppendText(self.starthelp) # display initial help text to history textctrl
+        
+        # commands list
+        self.cmdlist = ['/help','/join','/behost','/username','/exit','/end']
+        
+        # init done
+        self.SetSizer(self.appsizer) # set the app's sizer
+        self.SetAutoLayout(True) # enable automatic layout
+        self.Show(True) # show app
+        dbg('application started') # debug
+    
+    def OnTerminate(self,event):
+        global isHost
+        
+        for tc in serverclients: # terminate threads
+            tc.send('0sock_shutreq')
+            tc.stop()
+        if self.conhandler != None:
+            self.conhandler.stop()
+        if self.socket != None: # if socket exist
+            closeSocket(self.socket,isHost)
+            #if isHost == False: # only clients execute this command
+            #    try:
+            #        self.socket.shutdown(socket.SHUT_RDWR)
+            #    except socket.error as err:
+            #        dbg('socket shutdown error: '+str(err),'error')
+            #self.socket.close() # close socket
+        dbg('exiting...')
+        self.Destroy() # destroy application
+    
+    def cmdExecute(self,keys):
+        global username
+        global isHost
+        global serverclients
+        
+        dbg(keys[0])
+        if keys[0] == '/help': # display help
+            helptext = ("/help - display this help.\n"
+                        "/join [server ip] [port] - joins a server.\n"
+                        "/behost [server name] [port] - start a chat session.\n"
+                        "/end - ends a connection or closes the chat session.\n"
+                        "/username [username] - change username.\n"
+                        "/exit - terminate application.\n"
+                        )
+            self.history.AppendText(helptext)
+            
+        elif keys[0] == '/exit': # exit application
+            self.Close()
+            
+        elif keys[0] == '/end': # end chat
+            self.history.AppendText('Terminating connection...\n')
+            for tc in serverclients:
+                tc.send('0sock_shutreq')
+                tc.stop()
+            if self.conhandler != None:
+                self.conhandler.stop()
+            if self.socket != None:
+                closeSocket(self.socket,isHost)
+                #if isHost == False: # only clients can execute this command
+                #    try:
+                #        self.socket.shutdown(socket.SHUT_RDWR) # tell server to shutdown connection
+                #    except socket.error as err:
+                #        dbg('socket shutdown error: '+str(err),'error')
+                #self.socket.close() # close socket
+            time.sleep(0.5) # make sure socket closed
+            self.socket = None
+            self.history.AppendText('Connection closed.\n')
+            serverclients = []
+            self.conhandler = None
+            
+        elif keys[0] == '/username': # change you username
+            if len(keys) == 2:
+                username = str(keys[1])
+                self.history.AppendText('Your username is now "'+username+'"\n')
+                if self.socket != None:
+                    if isHost:
+                        dbg('sending updated userlist to clients')
+                        updateUsersList()
+                        for tc in serverclients:
+                            tc.send('0ulist_update '+self.users.GetValue())
+                    else:
+                        dbg('sending new username to server')
+                        self.socket.send('0usern_update '+username)
+            else:
+                self.history.AppendText('[Info]: New username not provided. Username not changed.\n')
+            
+        elif keys[0] == '/join' and (self.socket == None): # join a chat session
+            if len(keys) == 3:
+                dbg('joining server...')
+                hostip = str(keys[1])
+                port = int(keys[2])
+                self.socket = clientSocket(port, hostip,username)
+                if self.socket == None:
+                    return
+                isHost = False
+                clihandler = clientHandlerThread(None,None,self.socket)
+                clihandler.start()
+                serverclients.append(clihandler)
+                self.socket.send('0ulist_asknew') # ask for an updated users list
+            else:
+                self.history.AppendText('[Error]: Command requires 2 parameters: [host ip] [port]\n')
+            
+        elif keys[0] == '/behost' and (self.socket == None): # start a chat session
+            if len(keys) in [3,4]:
+                dbg('hosting a chat session...')
+                self.servername = str(keys[1])
+                port = int(keys[2])
+                if len(keys) == 3:
+                    cnum = 20
+                else:
+                    cnum = int(keys[3])
+                dbg('starting '+self.servername+' with port '+str(port)+' and max members of '+ str(cnum))
+                self.socket = serverSocket(port, cnum)
+                if self.socket == None:
+                    return
+                self.conhandler = connectionHandlerThread(self.socket)
+                self.conhandler.start()
+                self.history.AppendText('Chat session "'+self.servername+'" started on '+str(socket.gethostbyname(socket.getfqdn()))+' port '+str(port)+'.\n')
+                isHost = True
+            else:
+                self.history.AppendText('[Error]: Command requires at least 2 parameters: [servername] [port]\n')
+        
+        else:
+            self.history.AppendText('[Error]: Unknown command\n')
+                    
+        dbg('op done.')
+        return
+    
+    def OnEnter(self,event):
+        global isHost
+        
+        # enter has been pressed
+        inp = self.input.GetValue().lstrip()
+        out = '[' + username + ']: ' + inp + '\n'
+        
+        # check if input is command
+        if inp[:1] == '/':
+            # treat as command
+            keys = inp.split(' ')
+            if keys[0] in self.cmdlist:
+                self.cmdExecute(keys)
+            else:
+                self.history.AppendText('[ERROR]: Unknown command.\n')
+                dbg('Unknown command.','error')
+        else:
+            # treat as text
+            if self.socket == None:
+                self.history.AppendText('Not in a session and not hosting session.\n')
+            else:
+                self.history.AppendText(out)
+                dbg('sending '+str(out))
+                if isHost:
+                    for tc in serverclients:
+                        if not tc.term:
+                            tc.send('1'+str(out))
+                        else:
+                            tc = None
+                else:
+                    self.socket.send('1'+str(out))
+        self.input.Clear() # clear input box
+
+# Create and start application and frame
+app = wx.App(True,'log.txt') # create application
+frame = appFrame(None,'ChatC') # set frame
+app.MainLoop() # run main loop
