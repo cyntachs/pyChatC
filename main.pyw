@@ -62,6 +62,19 @@
 # printed in the chat history text box.
 
 
+# ==================================================
+
+# ==========
+# To-do list
+# ==========
+# 
+# *implement a state system to remove dependence on global vars
+# *update functions to use state system (functions should not modify any vars outside function)
+# *update classes to use state system (classes should not modify any vars outside of it scope)
+
+# ==================================================
+
+
 # =======
 # Imports
 # =======
@@ -70,28 +83,33 @@ import sys
 
 # before continuing we should check if application is compatible
 # with the current python version.
-if (sys.version_info < (2,7,8)) and (sys.version_info > (2)):
-    print('This application requires Python 2.7.8')
+if (sys.version_info < (3,6,6)):
+    print('This application requires Python 3.6.6 or greater')
 
-#import the rest of the dependencies
+# Import the rest of the dependencies
 import socket
 import threading
 import time
 import random
 import string
 
+# Try import SSL
+try: import ssl
+except ImportError: # import failed, show error.
+    print('This application requires the SSL module to run.')
+    sys.exit(11)
+
 # Import wxPython Module
-try:
-    import wx # import the wxPython module.
-except ImportError:
-    # import failed, show error.
-    print('This application requires the wxPython 3.0-msw module to run.')
+try: import wx # import the wxPython module.
+except ImportError: # import failed, show error.
+    print('This application requires the wxPython module to run.')
     sys.exit(10)
 
 # ================
 # Global Variables
 # ================
 
+# ==================== To be replaced ====================
 # Holds the pointer to the history textctrl
 historyData = ''
 # Holds the pointer to the users textctrl
@@ -103,16 +121,34 @@ isHost = False
 # Array that stores all the client handler threads
 # Only the host make use of this
 serverclients = []
+# ==================== To be replaced ====================
+
 # Debugging
-debugMode = False
-printToHistory = False
+debugMode = True
+printToHistory = True
+
+# ===========
+# State Class
+# ===========
+
+# state() : Object
+# Desc: Application state class
+class appState():
+    # __init__()
+    # Desc: class init function
+    def __init__(self):
+        self.historyData = '' # Holds the pointer to the history textctrl
+        self.userlistData = '' # Holds the pointer to the users textctrl
+        self.username = 'User_'+''.join(random.choice(string.digits) for i in range(5)) # Stores user's username (default username is generated)
+        self.isHost = False # Status variable that determines whether it is host or not
+        self.serverclients = [] # Array that stores all the client handler threads (Only the host make use of this)
 
 # =========
 # Functions
 # =========
 
 # Debug output function.
-def dbg(msg,type='info'):
+def dbg(msg,type='Status'):
     if debugMode:
         print('*['+type+']: '+msg)
         if printToHistory:
@@ -177,6 +213,19 @@ def serverSocket(port,cnum,iph):
     try:
         servsock.bind(hostaddr) # bind to socket
         servsock.listen(cnum) # listen for connections
+        
+        # SWITCH ENCRYPTION TO RSA
+        
+        # SSL ##########
+        #dbg('ssl setup...','SSL')
+        #sslctx = ssl._create_unverified_context()
+        #dbg('load cert chain','SSL')
+        #sslctx.load_cert_chain('server.crt','server.key')
+        #dbg('wrap socket','SSL')
+        #servsock = sslctx.wrap_socket(servsock, 'server.key', 'server.crt', True)
+        #dbg('ssl socket created!','SSL')
+        # SSL ##########
+        
         dbg('server socket created and now listening. cnum: '+str(cnum)) # debug
         return (servsock,hostaddr) # return socket object
     except socket.error as err:
@@ -190,6 +239,19 @@ def serverSocket(port,cnum,iph):
 # Desc: creates a client socket object using the supplied parameters
 def clientSocket(port,hostip,username):
     clisock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket object
+    
+    # SWITCH ENCRYPTION TO RSA
+    
+    # SSL ##########
+    #dbg('ssl setup...','SSL')
+    #sslctx = ssl._create_unverified_context()
+    #dbg('load cert chain','SSL')
+    #sslctx.load_cert_chain('server.crt')
+    #dbg('wrap socket','SSL')
+    #clisock = sslctx.wrap_socket(clisock, None, 'server.crt')
+    #dbg('ssl socket created!','SSL')
+    # SSL ##########
+    
     try:
         clisock.connect((hostip,port)) # connect to host
         dbg('client socket connected') # debug
@@ -553,6 +615,7 @@ class appFrame(wx.Frame):
                 port = int(keys[2]) # store parameter 2 to port
                 self.socket = clientSocket(port, hostip,username) # create a client socket object
                 if self.socket == None: # if socket creation failed
+                    dbg('Socket creation failed!','Error')
                     return # return function
                 isHost = False # we are not host
                 clihandler = clientHandlerThread(None,None,self.socket) # create a client handler thread to listen to server
