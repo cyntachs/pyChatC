@@ -124,7 +124,8 @@ serverclients = []
 # ==================== To be replaced ====================
 
 # Debugging
-debugMode = True
+debugMode = False
+sslEnable = False
 printToHistory = True
 
 # ===========
@@ -211,26 +212,40 @@ def serverSocket(port,cnum,iph):
         hostaddr = (str(iph),int(port))
     dbg('using '+str(hostaddr)) # debug
     try:
+        # SWITCH ENCRYPTION TO RSA TLS-V1.2
+        
+        if sslEnable:
+            # SSL ##########
+            dbg('ssl setup...','SSL')
+            sslctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            sslctx.verify_mode = ssl.CERT_REQUIRED
+            dbg('load default certs', 'SSL')
+            sslctx.load_default_certs()
+            dbg('load cert chain','SSL')
+            sslctx.load_cert_chain(certfile='./srv/certificate.pem', keyfile='./srv/key.pem')
+            dbg('wrap socket','SSL')
+            servsock = sslctx.wrap_socket(servsock, server_side=True)
+            dbg('ssl socket created!','SSL')
+            # SSL ##########
+        
+        dbg('binding to socket')
         servsock.bind(hostaddr) # bind to socket
+        dbg('listening for connections')
         servsock.listen(cnum) # listen for connections
-        
-        # SWITCH ENCRYPTION TO RSA
-        
-        # SSL ##########
-        #dbg('ssl setup...','SSL')
-        #sslctx = ssl._create_unverified_context()
-        #dbg('load cert chain','SSL')
-        #sslctx.load_cert_chain('server.crt','server.key')
-        #dbg('wrap socket','SSL')
-        #servsock = sslctx.wrap_socket(servsock, 'server.key', 'server.crt', True)
-        #dbg('ssl socket created!','SSL')
-        # SSL ##########
         
         dbg('server socket created and now listening. cnum: '+str(cnum)) # debug
         return (servsock,hostaddr) # return socket object
     except socket.error as err:
         dbg('server socket could not be created! :'+str(err),'error') # debug
         historyData.AppendText('Server socket could not be created on '+str(hostaddr)+':'+str(port)+'!\n'+str(err)+'\n')
+        return None
+    except ssl.SSLError as err:
+        dbg('server ssl error! :'+str(err), 'error') # debug
+        historyData.AppendText('Server SSL error!\n')
+        return None
+    except Exception as err:
+        dbg('error encountered trying to create a server socket! :'+str(err), 'error') # debug
+        historyData.AppendText('Server Socket encountered an error!')
         return None
 
 # clientSocket()
@@ -240,28 +255,45 @@ def serverSocket(port,cnum,iph):
 def clientSocket(port,hostip,username):
     clisock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket object
     
-    # SWITCH ENCRYPTION TO RSA
-    
-    # SSL ##########
-    #dbg('ssl setup...','SSL')
-    #sslctx = ssl._create_unverified_context()
-    #dbg('load cert chain','SSL')
-    #sslctx.load_cert_chain('server.crt')
-    #dbg('wrap socket','SSL')
-    #clisock = sslctx.wrap_socket(clisock, None, 'server.crt')
-    #dbg('ssl socket created!','SSL')
-    # SSL ##########
-    
     try:
+        # SWITCH ENCRYPTION TO RSA TLS-V1.2
+
+        if sslEnable:
+            # SSL ##########
+            dbg('ssl setup...','SSL')
+            sslctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            sslctx.verify_mode = ssl.CERT_REQUIRED
+            sslctx.check_hostname = False
+            dbg('load default cert','SSL')
+            sslctx.load_default_certs()
+            sslctx.load_verify_locations('./srv/certificate.pem')
+            dbg('load cert chain', 'SSL')
+            sslctx.load_cert_chain(certfile='./cli/certificate.pem', keyfile='./cli/key.pem')
+            dbg('wrap socket','SSL')
+            clisock = sslctx.wrap_socket(clisock)
+            dbg('ssl socket created!','SSL')
+            # SSL ##########
+        
+        dbg('connecting to host')
         clisock.connect((hostip,port)) # connect to host
-        dbg('client socket connected') # debug
-        clisock.send('0usern_update '+str(username)) # send a username update command
+        dbg('asking to update username')
+        clisock.send(bytes('0usern_update '+str(username), encoding='utf8')) # send a username update command
+        dbg('enabling keepalive')
         if clisock.getsockopt( socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 0:
             clisock.setsockopt(socket.SOL_SOCKET,socket.SO_KEEPALIVE,1) # enable keepalive
+        dbg('client connected') # debug
         return clisock #return socket object
     except socket.error as err:
         dbg('could not connect to server! :'+str(err),'error') # debug
         historyData.AppendText('Could not connect to server!\n'+str(err)+'\n') # print to history textctrl
+        return None
+    except ssl.SSLError as err:
+        dbg('client ssl error! :'+str(err), 'error') # debug
+        historyData.AppendText('Client SSL error!\n')
+        return None
+    except Exception as err:
+        dbg('error encountered trying to create a client socket! :'+str(err), 'error') # debug
+        historyData.AppendText('Client Socket encountered an error!')
         return None
 
 # closeSocket()
@@ -317,7 +349,7 @@ class clientHandlerThread(threading.Thread):
             global userlistData # access global variable userlistData
             global isHost # access global variable isHost
             try:
-                self.buffer = self.sock.recv(512) # retrieve message sent by client
+                self.buffer = str(self.sock.recv(512).decode('utf-8')) # retrieve message sent by client
                 if len(self.buffer) > 0: # check if len is not 0
                     dbg('received data from client: '+self.buffer) # debug
                     lock = threading.RLock() # create thread lock
@@ -381,7 +413,7 @@ class clientHandlerThread(threading.Thread):
         if self.sock != None: # is socket variable is not empty
             dbg('sending to client: '+str(data)) # debug
             try:
-                self.sock.send(str(data)) # send message to client
+                self.sock.send(bytes(str(data), encoding='utf-8')) # send message to client
             except socket.error as err: # could not send message to client
                 dbg('could not send message!\n'+str(err),'error') # debug
                 # show send error message to chat history
@@ -431,12 +463,12 @@ class connectionHandlerThread(threading.Thread):
                         dbg('connection handler thread terminated.') # debug
                         return # terminate thread
             clsock.setblocking(1) # temporarily set client socket to be blocking
-            user = clsock.recv(512) # receive initial command from client
+            user = str(clsock.recv(512).decode('utf-8')) # receive initial command from client
             if user[:1] == '0': # if msg is command
                 params = user[1:].split(' ') # split text with space as delimiters
                 if params[0] == 'usern_update': # if username update command
                     nusername = params[1] # store username
-                    clsock.send('1Welcome '+str(nusername)+'!\n') # send a welcome message to client
+                    clsock.send(bytes('1Welcome '+str(nusername)+'!\n', encoding='utf-8')) # send a welcome message to client
                     if historyData != '': # if historyData pointer is not empty
                         # print status
                         historyData.AppendText(''+str(nusername)+' has joined the chat.\n')
@@ -460,6 +492,7 @@ class connectionHandlerThread(threading.Thread):
             else:
                 closeSocket(clsock) # close connection
                 dbg('connection declined! - wrong message type','warn') # debug
+                dbg(user, 'warn')
         closeSocket(clsock) # close client connection
         dbg('connection handler thread terminated.') # debug
         return # terminate thread 
@@ -518,12 +551,17 @@ class appFrame(wx.Frame):
         
         # commands list
         self.cmdlist = ['/help','/join','/behost','/username','/exit','/end']
+        if debugMode:
+            self.cmdlist = self.cmdlist + ['/dbghost','/dbgjoin']
         
         # init done
         self.SetSizer(self.appsizer) # set the app's sizer
         self.SetAutoLayout(True) # enable automatic layout
         self.Show(True) # show app
         dbg('application started') # debug
+        dbg('version info: '+str(sys.version_info))
+        if (sys.version_info < (3,6,6)):
+            dbg('This application requires Python 3.6.6 or greater', 'warning')
     
     # OnTerminate()
     # Params: self, event - provided by event
@@ -603,7 +641,7 @@ class appFrame(wx.Frame):
                         updateUsersList(True) # update the users list
                     else: # we are not host
                         dbg('sending new username to server') # debug
-                        self.socket.send('0usern_update '+username) # send new username to server
+                        self.socket.send(bytes('0usern_update '+username, encoding='utf-8')) # send new username to server
             else:
                 # print an error message
                 self.history.AppendText('[Info]: New username not provided. Username not changed.\n')
@@ -622,7 +660,7 @@ class appFrame(wx.Frame):
                 clihandler.username = 'Host'
                 clihandler.start() # start thread
                 serverclients.append(clihandler) # place in serverclients array - this will be the only thread in the array
-                self.socket.send('0ulist_asknew') # ask for an updated users list
+                self.socket.send(bytes('0ulist_asknew', encoding='utf-8')) # ask for an updated users list
             else:
                 # print error message
                 self.history.AppendText('[Error]: Command requires 2 parameters: [host ip] [port]\n')
@@ -655,6 +693,31 @@ class appFrame(wx.Frame):
                                          'Advanced setup: "/behost [servername] [port] [number of clients] [host ip]"\n'
                                          ))
         
+        elif keys[0] == '/dbghost' and (self.socket == None): # debug host
+            dbg('hosting a chat session...')
+            dbg('starting debugserver with port 24000 and max members of 30') # debug
+            self.socket,sockaddr = serverSocket(24000,30,"localhost") # create server socket object
+            if self.socket == None: # if socket creation failed
+                    return # return function
+            self.conhandler = connectionHandlerThread(self.socket) # create connection handler thread
+            self.conhandler.start() # start conhandler thread
+            # print status
+            self.history.AppendText('Chat session "'+self.servername+'" started on '+str(sockaddr[0])+' port '+str(sockaddr[1])+'.\n')
+            isHost = True # we are host
+
+        elif keys[0] == '/dbgjoin' and (self.socket == None): # debug join
+            dbg('joining server...') # debug
+            self.socket = clientSocket(24000, "localhost",username) # create a client socket object
+            if self.socket == None: # if socket creation failed
+                dbg('Socket creation failed!','Error')
+                return # return function
+            isHost = False # we are not host
+            clihandler = clientHandlerThread(None,None,self.socket) # create a client handler thread to listen to server
+            clihandler.username = 'Host'
+            clihandler.start() # start thread
+            serverclients.append(clihandler) # place in serverclients array - this will be the only thread in the array
+            self.socket.send(bytes('0ulist_asknew', encoding='utf-8')) # ask for an updated users list
+
         else:
             # print error message
             self.history.AppendText('[Error]: Unknown command\n')
@@ -699,7 +762,7 @@ class appFrame(wx.Frame):
                         else: # do some cleanup
                             tc = None # remove thread
                 else: # we are client
-                    self.socket.send('1'+str(out)) # send to server
+                    self.socket.send(bytes('1'+str(out), encoding='utf-8')) # send to server
 
 # ==========================
 # Application init and start
