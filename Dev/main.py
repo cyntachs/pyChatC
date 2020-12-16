@@ -68,9 +68,16 @@
 # To-do list
 # ==========
 # 
+# *user friendliness:
+#  - make port default to 24443
+#  - make commands need less params
+#  - input history
 # *implement a state system to remove dependence on global vars
 # *update functions to use state system (functions should not modify any vars outside function)
 # *update classes to use state system (classes should not modify any vars outside of it scope)
+#
+# *SSL: implement method to get certificate of peer and verify it during handshake
+# *SSL: system to auto generate certificates
 
 # ==================================================
 
@@ -164,7 +171,7 @@ def sendToAll(msg,notclients=[]):
         for tc in serverclients:
             if tc.username in notclients:
                 continue
-            if tc.isAlive() and (not tc.term):
+            if tc.is_alive() and (not tc.term):
                 try:
                     tc.send(str(msg))
                 except socket.error as err:
@@ -183,11 +190,11 @@ def updateUsersList(sendupdate=False):
         userlistData.Clear()
         userlistData.AppendText('#['+str(username)+']\n')
         for tc in serverclients:
-            if tc.isAlive() and (not tc.term):
+            if tc.is_alive() and (not tc.term):
                 userlistData.AppendText('#'+tc.username+'\n')
     if sendupdate and isHost:
         for tc in serverclients:
-            if tc.isAlive() and (not tc.term):
+            if tc.is_alive() and (not tc.term):
                 try:
                     tc.send('0ulist_update '+userlistData.GetValue())
                 except socket.error as err:
@@ -212,22 +219,6 @@ def serverSocket(port,cnum,iph):
         hostaddr = (str(iph),int(port))
     dbg('using '+str(hostaddr)) # debug
     try:
-        # SWITCH ENCRYPTION TO RSA TLS-V1.2
-        
-        if sslEnable:
-            # SSL ##########
-            dbg('ssl setup...','SSL')
-            sslctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            sslctx.verify_mode = ssl.CERT_REQUIRED
-            dbg('load default certs', 'SSL')
-            sslctx.load_default_certs()
-            dbg('load cert chain','SSL')
-            sslctx.load_cert_chain(certfile='./srv/certificate.pem', keyfile='./srv/key.pem')
-            dbg('wrap socket','SSL')
-            servsock = sslctx.wrap_socket(servsock, server_side=True)
-            dbg('ssl socket created!','SSL')
-            # SSL ##########
-        
         dbg('binding to socket')
         servsock.bind(hostaddr) # bind to socket
         dbg('listening for connections')
@@ -238,10 +229,6 @@ def serverSocket(port,cnum,iph):
     except socket.error as err:
         dbg('server socket could not be created! :'+str(err),'error') # debug
         historyData.AppendText('Server socket could not be created on '+str(hostaddr)+':'+str(port)+'!\n'+str(err)+'\n')
-        return None
-    except ssl.SSLError as err:
-        dbg('server ssl error! :'+str(err), 'error') # debug
-        historyData.AppendText('Server SSL error!\n')
         return None
     except Exception as err:
         dbg('error encountered trying to create a server socket! :'+str(err), 'error') # debug
@@ -256,14 +243,12 @@ def clientSocket(port,hostip,username):
     clisock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket object
     
     try:
-        # SWITCH ENCRYPTION TO RSA TLS-V1.2
-
         if sslEnable:
             # SSL ##########
             dbg('ssl setup...','SSL')
             sslctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            sslctx.verify_mode = ssl.CERT_REQUIRED
             sslctx.check_hostname = False
+            sslctx.verify_mode = ssl.CERT_REQUIRED
             dbg('load default cert','SSL')
             sslctx.load_default_certs()
             sslctx.load_verify_locations('./srv/certificate.pem')
@@ -456,12 +441,37 @@ class connectionHandlerThread(threading.Thread):
                 try:
                     (clsock,(ip,port)) = self.sock.accept() # accept connections
                     dbg('accepted a connection') # debug
+        
+                    if sslEnable:
+                        # SSL ##########
+                        dbg('ssl setup...','SSL')
+                        sslctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                        sslctx.check_hostname = False
+                        sslctx.verify_mode = ssl.CERT_REQUIRED
+                        dbg('load default certs', 'SSL')
+                        sslctx.load_default_certs()
+                        sslctx.load_verify_locations('./cli/certificate.pem')
+                        dbg('load cert chain','SSL')
+                        sslctx.load_cert_chain(certfile='./srv/certificate.pem', keyfile='./srv/key.pem')
+                        dbg('wrap socket','SSL')
+                        clsock = sslctx.wrap_socket(clsock, server_side=True)
+                        dbg('ssl socket created!','SSL')
+                        # SSL ##########
+                    
                     break # break loop
                 except socket.error as err: # handle socket error
                     if self.term: # if terminating
                         closeSocket(clsock) # close socket
                         dbg('connection handler thread terminated.') # debug
                         return # terminate thread
+                except ssl.SSLError as err:
+                    dbg('ssl error on connection accept :'+str(err), 'error')
+                    historyData.AppendText('SSL error on client connect!\n')
+                    return
+                except Exception as err:
+                    dbg('error on accept :'+str(err), 'error')
+                    historyData.AppendText('Error on connection attempt!\n')
+                    return # terminate thread
             clsock.setblocking(1) # temporarily set client socket to be blocking
             user = str(clsock.recv(512).decode('utf-8')) # receive initial command from client
             if user[:1] == '0': # if msg is command
@@ -757,7 +767,7 @@ class appFrame(wx.Frame):
                 if isHost: # if host
                     # send to all clients
                     for tc in serverclients:
-                        if tc.isAlive(): # if thread is not dead
+                        if tc.is_alive(): # if thread is not dead
                             tc.send('1'+str(out)) # send to client
                         else: # do some cleanup
                             tc = None # remove thread
