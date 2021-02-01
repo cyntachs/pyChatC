@@ -72,15 +72,23 @@
 #  - make port default to 24443
 #  - make commands need less params
 #  - input history
-# *implement a state system to remove dependence on global vars
-# *update functions to use state system (functions should not modify any vars outside function)
-# *update classes to use state system (classes should not modify any vars outside of it scope)
-#
 # *SSL: implement method to get certificate of peer and verify it during handshake
 # *SSL: system to auto generate certificates
+#
+# *implement a state system to remove dependence on global vars
+# *state system would allow for multiple chat lobbies
+# *update functions to use state system (functions should not modify any vars outside function)
+# *update classes to use state system (classes should not modify any vars outside of it scope)
 
 # ==================================================
 
+# User Friendliness Outline
+#
+# *unify join and host commands
+# /join [ip addr] [name of lobby]
+# /behost [name of lobby]
+
+# ==================================================
 
 # =======
 # Imports
@@ -135,21 +143,26 @@ debugMode = True
 sslEnable = True
 printToHistory = True
 
-# ===========
-# State Class
-# ===========
+# ===============
+# Connection Data
+# ===============
 
 # state() : Object
-# Desc: Application state class
-class appState():
+# Desc: Connection data
+class ConData():
     # __init__()
     # Desc: class init function
     def __init__(self):
-        self.historyData = '' # Holds the pointer to the history textctrl
-        self.userlistData = '' # Holds the pointer to the users textctrl
-        self.username = 'User_'+''.join(random.choice(string.digits) for i in range(5)) # Stores user's username (default username is generated)
-        self.isHost = False # Status variable that determines whether it is host or not
-        self.serverclients = [] # Array that stores all the client handler threads (Only the host make use of this)
+        # Holds the pointer to the history textctrl
+        self.historyData = ''
+        # Holds the pointer to the users textctrl
+        self.userlistData = ''
+        # Stores user's username (default username is generated)
+        self.username = 'User_'+''.join(random.choice(string.digits) for i in range(5))
+        # Status variable that determines whether it is host or not
+        self.isHost = False
+        # Array that stores all the client handler threads (Only the host make use of this)
+        self.serverclients = []
 
 # =========
 # Functions
@@ -261,8 +274,6 @@ def clientSocket(port,hostip,username):
         
         dbg('connecting to host')
         clisock.connect((hostip,port)) # connect to host
-        dbg('asking to update username')
-        clisock.send(bytes('0usern_update '+str(username), encoding='utf8')) # send a username update command
         dbg('enabling keepalive')
         if clisock.getsockopt( socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 0:
             clisock.setsockopt(socket.SOL_SOCKET,socket.SO_KEEPALIVE,1) # enable keepalive
@@ -572,6 +583,7 @@ class appFrame(wx.Frame):
         dbg('version info: '+str(sys.version_info))
         if (sys.version_info < (3,6,6)):
             dbg('This application requires Python 3.6.6 or greater', 'warning')
+            self.history.AppendText('This application requires Python 3.6.6 or greater\n\n')
     
     # OnTerminate()
     # Params: self, event - provided by event
@@ -661,14 +673,20 @@ class appFrame(wx.Frame):
                 dbg('joining server...') # debug
                 hostip = str(keys[1]) # store parameter 1 to hostname
                 port = int(keys[2]) # store parameter 2 to port
+
                 self.socket = clientSocket(port, hostip,username) # create a client socket object
                 if self.socket == None: # if socket creation failed
                     dbg('Socket creation failed!','Error')
                     return # return function
                 isHost = False # we are not host
+                
+                dbg('asking to update username')
+                self.socket.send(bytes('0usern_update '+str(username), encoding='utf8')) # send a username update command
+                
                 clihandler = clientHandlerThread(None,None,self.socket) # create a client handler thread to listen to server
                 clihandler.username = 'Host'
                 clihandler.start() # start thread
+
                 serverclients.append(clihandler) # place in serverclients array - this will be the only thread in the array
                 self.socket.send(bytes('0ulist_asknew', encoding='utf-8')) # ask for an updated users list
             else:
@@ -722,9 +740,14 @@ class appFrame(wx.Frame):
                 dbg('Socket creation failed!','Error')
                 return # return function
             isHost = False # we are not host
+
+            dbg('asking to update username')
+            self.socket.send(bytes('0usern_update '+str(username), encoding='utf8')) # send a username update command
+
             clihandler = clientHandlerThread(None,None,self.socket) # create a client handler thread to listen to server
             clihandler.username = 'Host'
             clihandler.start() # start thread
+
             serverclients.append(clihandler) # place in serverclients array - this will be the only thread in the array
             self.socket.send(bytes('0ulist_asknew', encoding='utf-8')) # ask for an updated users list
 
