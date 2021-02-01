@@ -6,26 +6,36 @@ A simple chat program.
 ## Commands list
 
 /behost - hosts a chat server
-usage: /behost [server name] [port]
+
+usage: `/behost [server name] [port]`
+
 advanced setup:
-/behost [server name] [port] [number of clients] [ip address to use]
+
+`/behost [server name] [port] [number of clients] [ip address to use]`
 
 /join - joins a chat server
-usage: /join [server ip] [port]
+
+usage: `/join [server ip] [port]`
 
 /end - ends connection
-usage: /end
+
+usage: `/end`
 
 /help - shows a list of commands and their uses.
-usage: /help
+
+usage: `/help`
 
 /username - change your username
-usage /username [new username]
- *Note that your username should not have any spaces*
+
+usage `/username [new username]`
+
+ *(Note that your username should not have any spaces)*
 
 /exit - terminates application
-usage: /terminate
- *Note that existing connections would be closed*
+
+usage: `/terminate`
+
+ *(Note that existing connections would be closed)*
 
 
 *Note: Instructions are assuming a Windows operating system. For other OS, please adapt as needed.*
@@ -70,9 +80,11 @@ file.
 ## Starting a server
 
 To start a server, type:
+
 `/behost [a name for the server] [port to use]`
 
 ex:
+
 `/behost chatserver 9200`
 
 The port provided must not be already used or the server will fail
@@ -80,9 +92,11 @@ to bind to the port.
 The application will say when the server has been created.
 
 To join a server, type:
+
 `/join [the server's ip address] [port number]`
 
 ex:
+
 `/join 64.187.254.20 9200`
 
 The client will attempt to connect to the server. If the connection
@@ -90,6 +104,7 @@ fails it will show the reason why. Note that you cannot use this
 if you are already connected or is hosting the server. 
 
 To end the connection type:
+
 `/end`
 
 This will close the server if you are a server or disconnect from
@@ -97,6 +112,7 @@ the server if you are a client. This will now allow you to use
 `/join` and `/behost` again.
 
 To terminate the application you can type:
+
 `/exit`
 
 
@@ -105,16 +121,19 @@ To terminate the application you can type:
 Message exchange is the same as any other chat program. Just type in
 a message in the input box and press enter. Everyone connected will 
 receive the message. You can change your username by typing:
+
 `/username [your new username]`
 
 
 ## Other Blurbs
 
 The application was previously developed in Eclipse with pyDev.
+
 Eclipse:    https://eclipse.org/
 pyDev:      http://marketplace.eclipse.org/node/114
 
 Current application development is done with Visual Studio Code with the VS Code Python Extension by Microsoft.
+
 VS Code:    https://code.visualstudio.com/
 
 This application support multiple clients up to a 
