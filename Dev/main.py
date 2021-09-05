@@ -73,6 +73,7 @@
 #  - make commands need less params
 #  - input history
 # *SSL: implement method to get certificate of peer and verify it during handshake
+#         - Client verifies, accepts (user input) and stores server certificate (like SSH)
 # *SSL: system to auto generate certificates
 #
 # *implement a state system to remove dependence on global vars
