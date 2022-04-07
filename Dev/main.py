@@ -67,7 +67,9 @@
 # ==========
 # To-do list
 # ==========
-# 
+#
+# *finish implementation of state system (condata) 
+#
 # *user friendliness:
 #  - make port default to 24443
 #  - make commands need less params
@@ -127,22 +129,22 @@ except ImportError: # import failed, show error.
 
 # ==================== To be replaced ====================
 # Holds the pointer to the history textctrl
-historyData = ''
+#historyData = ''
 # Holds the pointer to the users textctrl
-userlistData = ''
+#userlistData = ''
 # Stores user's username
-username = 'User_'+''.join(random.choice(string.digits) for i in range(5)) # generate a default username
+#username = 'User_'+''.join(random.choice(string.digits) for i in range(5)) # generate a default username
 # Status variable that determines whether it is host or not
-isHost = False
+#isHost = False
 # Array that stores all the client handler threads
 # Only the host make use of this
-serverclients = []
+#serverclients = []
 # ==================== To be replaced ====================
 
 # Debugging
-debugMode = True
-sslEnable = True
-printToHistory = True
+debugMode:bool = True
+sslEnable:bool = True
+printToHistory:bool = True
 
 # ===============
 # Connection Data
@@ -155,34 +157,34 @@ class ConData():
     # Desc: class init function
     def __init__(self):
         # Holds the pointer to the history textctrl
-        self.historyData = ''
+        self.historyData:str = ''
         # Holds the pointer to the users textctrl
-        self.userlistData = ''
+        self.userlistData:str = ''
         # Stores user's username (default username is generated)
-        self.username = 'User_'+''.join(random.choice(string.digits) for i in range(5))
+        self.username:str = 'User_'+''.join(random.choice(string.digits) for i in range(5))
         # Status variable that determines whether it is host or not
-        self.isHost = False
+        self.isHost:bool = False
         # Array that stores all the client handler threads (Only the host make use of this)
-        self.serverclients = []
+        self.serverclients:list[clientHandlerThread] = []
 
 # =========
 # Functions
 # =========
 
 # Debug output function.
-def dbg(msg,type='Status'):
+def dbg(state:ConData, msg:str, type:str = 'Status'):
     if debugMode:
         print('*['+type+']: '+msg)
         if printToHistory:
-            historyData.AppendText('*['+type+']: '+msg+'\n')
+            state.historyData.AppendText('*['+type+']: '+msg+'\n')
 
 # sendToAll()
 # Params: msg - send message
 # Desc: facilitates sending a message to all clients
-def sendToAll(msg,notclients=[]):
+def sendToAll(state:ConData, msg:string, notclients:str = []):
     if isHost:
         dbg('sending to all clients: '+str(msg))
-        for tc in serverclients:
+        for tc in state.serverclients:
             if tc.username in notclients:
                 continue
             if tc.is_alive() and (not tc.term):
@@ -196,21 +198,19 @@ def sendToAll(msg,notclients=[]):
 # updateUSersList()
 # Params: none
 # Desc: updates the users list textctrl
-def updateUsersList(sendupdate=False):
-    global username
-    global userlistData
+def updateUsersList(state:ConData, sendupdate:bool = False):
     dbg('updating user list')
-    if userlistData != '':
-        userlistData.Clear()
-        userlistData.AppendText('#['+str(username)+']\n')
-        for tc in serverclients:
+    if state.userlistData != '':
+        state.userlistData.Clear()
+        state.userlistData.AppendText('#['+str(state.username)+']\n')
+        for tc in state.serverclients:
             if tc.is_alive() and (not tc.term):
-                userlistData.AppendText('#'+tc.username+'\n')
-    if sendupdate and isHost:
-        for tc in serverclients:
+                state.userlistData.AppendText('#'+tc.username+'\n')
+    if sendupdate and state.isHost:
+        for tc in state.serverclients:
             if tc.is_alive() and (not tc.term):
                 try:
-                    tc.send('0ulist_update '+userlistData.GetValue())
+                    tc.send('0ulist_update '+state.userlistData.GetValue())
                 except socket.error as err:
                     continue
 
@@ -218,7 +218,7 @@ def updateUsersList(sendupdate=False):
 # Params: port - Port number, cnum - Number of clients to listen
 # Desc: creates a server socket object with the supplied port
 # and listener number
-def serverSocket(port,cnum,iph):
+def serverSocket(state:ConData, port:int, cnum:int, iph:str):
     servsock = socket.socket(socket.AF_INET,socket.SOCK_STREAM) # create socket object
     servsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # set some options
     # get ip address
@@ -242,18 +242,17 @@ def serverSocket(port,cnum,iph):
         return (servsock,hostaddr) # return socket object
     except socket.error as err:
         dbg('server socket could not be created! :'+str(err),'error') # debug
-        historyData.AppendText('Server socket could not be created on '+str(hostaddr)+':'+str(port)+'!\n'+str(err)+'\n')
+        state.historyData.AppendText('Server socket could not be created on '+str(hostaddr)+':'+str(port)+'!\n'+str(err)+'\n')
         return None
     except Exception as err:
         dbg('error encountered trying to create a server socket! :'+str(err), 'error') # debug
-        historyData.AppendText('Server Socket encountered an error!')
+        state.historyData.AppendText('Server Socket encountered an error!')
         return None
 
 # clientSocket()
 # Params: port - Port number, hostip - The host to connect to,
-# username - the user's username
 # Desc: creates a client socket object using the supplied parameters
-def clientSocket(port,hostip,username):
+def clientSocket(state:ConData, port:int, hostip:str):
     clisock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket object
     
     try:
@@ -282,29 +281,29 @@ def clientSocket(port,hostip,username):
         return clisock #return socket object
     except socket.error as err:
         dbg('could not connect to server! :'+str(err),'error') # debug
-        historyData.AppendText('Could not connect to server!\n'+str(err)+'\n') # print to history textctrl
+        state.historyData.AppendText('Could not connect to server!\n'+str(err)+'\n') # print to history textctrl
         return None
     except ssl.SSLError as err:
         dbg('client ssl error! :'+str(err), 'error') # debug
-        historyData.AppendText('Client SSL error!\n')
+        state.historyData.AppendText('Client SSL error!\n')
         return None
     except Exception as err:
         dbg('error encountered trying to create a client socket! :'+str(err), 'error') # debug
-        historyData.AppendText('Client Socket encountered an error!')
+        state.historyData.AppendText('Client Socket encountered an error!')
         return None
 
 # closeSocket()
 # Params: sock - teh socket object, noshut - whether we should
 # call shutdown or not (default FALSE)
 # Desc: closes and shuts down a socket connection
-def closeSocket(sock,noshut = False):
+def closeSocket(state:ConData, sock, noshut:bool = False):
     if sock == None: # we only attempt to close socket if it exist
         return
     if not noshut:
         try:
             sock.shutdown(socket.SHUT_RDWR)
         except socket.error as err:
-            dbg('socket shutdown error: '+str(err))
+            dbg(state, 'socket shutdown error: '+str(err))
     sock.close()
 
 # ==============
@@ -805,4 +804,5 @@ class appFrame(wx.Frame):
 # Create and start application and frame
 app = wx.App() # create application
 frame = appFrame(None,'ChatC') # set frame
-app.MainLoop() # run main loop 
+if __name__ == '__main__':
+    app.MainLoop() # run main loop 
